@@ -1,4 +1,3 @@
-# 构建一个2层的GNN模型
 import dgl.data
 import dgl.nn as dglnn
 import torch
@@ -8,10 +7,11 @@ import copy
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+# 构建一个2层的GNN模型
 class GCN(nn.Module):
     def __init__(self, in_feats, hid_feats, out_feats):
         super().__init__()
-        # 实例化SAGEConv，in_feats是输入特征的维度，out_feats是输出特征的维度，aggregator_type是聚合函数的类型
+        # 实例化GraphConv，in_feats是输入特征的维度，out_feats是输出特征的维度
         #  .. math::
         #       h_i^{(l+1)} = \sigma(b^{(l)} + \sum_{j\in\mathcal{N}(i)}\frac{1}{c_{ji}}h_j^{(l)}W^{(l)})
         self.conv1 = dglnn.GraphConv(

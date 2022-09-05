@@ -8,23 +8,54 @@ import copy
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # 构建一个2层的GNN模型
-class GCN(nn.Module):
-    def __init__(self, in_feats, hid_feats, out_feats):
-        super().__init__()
-        # 实例化GraphConv，in_feats是输入特征的维度，out_feats是输出特征的维度
-        #  .. math::
-        #       h_i^{(l+1)} = \sigma(b^{(l)} + \sum_{j\in\mathcal{N}(i)}\frac{1}{c_{ji}}h_j^{(l)}W^{(l)})
-        self.conv1 = dglnn.GraphConv(
-            in_feats=in_feats, out_feats=hid_feats, norm='both', weight=True, bias=True)
-        self.conv2 = dglnn.GraphConv(
-            in_feats=hid_feats, out_feats=out_feats, norm='both', weight=True, bias=True)
+# class GCN(nn.Module):
+#     def __init__(self, in_feats, hid_feats, out_feats):
+#         super().__init__()
+#         # 实例化GraphConv，in_feats是输入特征的维度，out_feats是输出特征的维度
+#         #  .. math::
+#         #       h_i^{(l+1)} = \sigma(b^{(l)} + \sum_{j\in\mathcal{N}(i)}\frac{1}{c_{ji}}h_j^{(l)}W^{(l)})
+#         self.conv1 = dglnn.GraphConv(
+#             in_feats=in_feats, out_feats=hid_feats, norm='both', weight=True, bias=True)
+#         self.conv2 = dglnn.GraphConv(
+#             in_feats=hid_feats, out_feats=out_feats, norm='both', weight=True, bias=True)
+#
+#     def forward(self, graph, inputs):
+#         # 输入是节点的特征
+#         h = self.conv1(graph, inputs)
+#         h = F.relu(h)
+#         h = self.conv2(graph, h)
+#         return h
+## 定义消息函数 和 reduce函数
+gcn_msg = dgl.function.copy_src(src='h', out='m')#内置消息功能，使用源节点特征计算消息
+gcn_reduce = dgl.function.sum(msg='m', out='h')#对所有消息求和来更新节点特征ft
 
-    def forward(self, graph, inputs):
-        # 输入是节点的特征
-        h = self.conv1(graph, inputs)
-        h = F.relu(h)
-        h = self.conv2(graph, h)
-        return h
+## 定义GCNLayer
+class GCNLayer(nn.Module):
+    def __init__(self, in_feats, out_feats):
+        super(GCNLayer, self).__init__()
+        self.linear = nn.Linear(in_feats, out_feats)
+
+    def forward(self, g, feature):
+        # Creating a local scope so that all the stored ndata and edata
+        # (such as the `'h'` ndata below) are automatically popped out
+        # when the scope exits.
+        with g.local_scope():
+            g.ndata['h'] = feature
+            g.update_all(gcn_msg, gcn_reduce) # update_all() 是一个高级API。它在单个API调用里合并了消息生成、 消息聚合和节点特征更新，这为从整体上进行系统优化提供了空间。
+            h = g.ndata['h']
+            return self.linear(h)
+
+class Net(nn.Module):
+    def __init__(self,in_feats, hid_feats, out_feats):
+        super(Net, self).__init__()
+        self.layer1 = GCNLayer(in_feats, hid_feats)#调用GCN层
+        self.layer2 = GCNLayer(hid_feats, out_feats)#调用GCN层
+
+    def forward(self, g, features):
+        x = F.relu(self.layer1(g, features))
+        x = self.layer2(g, x)
+        return x
+
 
 def load_dataset(): #加载数据
     """
@@ -59,7 +90,8 @@ def evaluate(model, graph, features, labels, mask): #模型评估
 node_features, node_labels,train_mask, valid_mask, test_mask, n_features, n_labels,graph=load_dataset()
 
 def train():
-    model = GCN(in_feats=n_features, hid_feats=100, out_feats=n_labels).to(device)
+    # model = GCN(in_feats=n_features, hid_feats=100, out_feats=n_labels).to(device)
+    model = Net(in_feats=n_features, hid_feats=100, out_feats=n_labels).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-4)
     loss_function = torch.nn.CrossEntropyLoss().to(device)
     model.train()
